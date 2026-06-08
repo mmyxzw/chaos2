@@ -314,11 +314,15 @@ func runPython(ctx *CognitiveContext) {
 		},
 	})
 
+	pythonBin := os.Getenv("CHAOS2_PYTHON_BIN")
+	if pythonBin == "" {
+		pythonBin = "python3"
+	}
 	script := os.Getenv("CHAOS2_PYTHON_BRIDGE")
 	if script == "" {
 		script = "python/ollama_bridge.py"
 	}
-	cmd := exec.Command("python3", script)
+	cmd := exec.Command(pythonBin, script)
 	cmd.Stdin = strings.NewReader(string(payload))
 	out, err := cmd.Output()
 	if err != nil {
