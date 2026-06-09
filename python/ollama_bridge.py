@@ -28,9 +28,10 @@ PLAN_VOICE = {
 }
 
 def build_prompt(ctx):
-    chaos_state = ctx.get("chaos_state", "Neutral")
-    strategy    = ctx.get("strategy", "observe")
-    history     = ctx.get("history", [])
+    chaos_state  = ctx.get("chaos_state", "Neutral")
+    strategy     = ctx.get("strategy", "observe")
+    history      = ctx.get("history", [])
+    inferences   = ctx.get("player", {}).get("inferences", "none")
 
     voice = STATE_VOICE.get(chaos_state, STATE_VOICE["Neutral"])
     plan  = PLAN_VOICE.get(strategy, PLAN_VOICE["observe"])
@@ -50,11 +51,13 @@ def build_prompt(ctx):
     entries.sort(key=lambda x: x[0], reverse=True)
     recent = "\n".join(content for _, content in reversed(entries[:4]))
 
+    pattern = f"Pattern: {inferences}\n" if inferences and inferences != "none" else ""
+
     return f"""You are Chaos. One or two sentences maximum. No explanation.
 
 State: {chaos_state}. {voice}
 {plan}
-
+{pattern}
 {("---\n" + recent + "\n---\n") if recent else ""}"{ctx['text']}"
 
 Chaos:"""

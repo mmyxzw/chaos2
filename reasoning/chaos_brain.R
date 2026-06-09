@@ -159,11 +159,29 @@ repeat {
 
   r <- decide(sess, chaos_state)
 
+  # prolog facts — R observes, Prolog infers
+  counts <- sess$counts
+  facts <- paste(c(
+    paste0("aggression_count(",   as.integer(counts$aggression),   ")"),
+    paste0("trust_count(",        as.integer(counts$trust),        ")"),
+    paste0("withdrawal_count(",   as.integer(counts$withdrawal),   ")"),
+    paste0("provocation_count(",  as.integer(counts$provocation),  ")"),
+    paste0("intimacy_count(",     as.integer(counts$intimacy),     ")"),
+    paste0("philosophical_count(",as.integer(counts$philosophical),")"),
+    paste0("curiosity_count(",    as.integer(counts$curiosity),    ")"),
+    paste0("total(",              as.integer(sess$total),          ")"),
+    paste0("dominant(",           r$dominant_intent,               ")"),
+    paste0("emotional_drift(",    r$emotional_drift,               ")"),
+    paste0("volatility(",         r$volatility,                    ")"),
+    sprintf("trust_level(%.2f)",  sess$trust_level)
+  ), collapse = ";")
+
   cat(sprintf(
-    "plan=%s|player_type=%s|threat_level=%d|emotional_drift=%s|manipulation=%s|confidence=%.2f|dominant_intent=%s|trust_level=%.2f|volatility=%s|intimacy_signals=%d|aggression_count=%d\n",
+    "plan=%s|player_type=%s|threat_level=%d|emotional_drift=%s|manipulation=%s|confidence=%.2f|dominant_intent=%s|trust_level=%.2f|volatility=%s|intimacy_signals=%d|aggression_count=%d|prolog_facts=%s\n",
     r$plan, r$player_type, r$threat_level, r$emotional_drift,
     r$manipulation, r$confidence, r$dominant_intent,
-    r$trust_level, r$volatility, r$intimacy_signals, r$aggression_count
+    r$trust_level, r$volatility, r$intimacy_signals, r$aggression_count,
+    facts
   ))
   flush(stdout())
 }

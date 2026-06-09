@@ -37,6 +37,7 @@ type RBrainResult struct {
 	Volatility      string
 	IntimacySignals string
 	AggressionCount string
+	PrologFacts     string
 }
 
 type CognitiveContext struct {
@@ -270,6 +271,7 @@ func parseROutput(raw string) RBrainResult {
 		case "volatility":       r.Volatility = v
 		case "intimacy_signals": r.IntimacySignals = v
 		case "aggression_count": r.AggressionCount = v
+		case "prolog_facts":     r.PrologFacts = v
 		}
 	}
 	return r
@@ -421,15 +423,47 @@ func runAttention(ctx *CognitiveContext) {
 }
 
 // Prolog — mirror
+// R exports facts; Prolog reasons over them and returns inferences.
 func runMirror(ctx *CognitiveContext) {
+	if ctx.RBrain.PrologFacts == "" {
+		ctx.PlayerModel = "none"
+		return
+	}
+
+	// write R-exported facts as Prolog assertions into a temp file
+	tmp, err := os.CreateTemp("", "chaos2_mirror_*.pl")
+	if err != nil {
+		ctx.PlayerModel = "none"
+		return
+	}
+	defer os.Remove(tmp.Name())
+
+	// R exports facts as "key(value)" — split into 3-arg player_fact/3
+	sid := ctx.Session.SessionID
+	for _, fact := range strings.Split(ctx.RBrain.PrologFacts, ";") {
+		fact = strings.TrimSpace(fact)
+		if fact == "" {
+			continue
+		}
+		open := strings.Index(fact, "(")
+		close := strings.LastIndex(fact, ")")
+		if open < 0 || close < 0 || close <= open {
+			continue
+		}
+		key := fact[:open]
+		val := fact[open+1 : close]
+		fmt.Fprintf(tmp, ":- assertz(mirror:player_fact('%s', %s, %s)).\n", sid, key, val)
+	}
+	tmp.Close()
+
 	goal := fmt.Sprintf(
-		"consult('mirror/player.pl'), mirror:print_model('%s'), halt.",
-		ctx.Session.SessionID,
+		"consult('mirror/player.pl'), consult('%s'), mirror:print_inferences('%s'), halt.",
+		tmp.Name(), sid,
 	)
 	out, err := exec.Command("swipl", "-g", goal, "-t", "halt").Output()
 	if err != nil {
 		log.Printf("[mirror] prolog error: %v", err)
-		ctx.PlayerModel = "type=unknown"
+		ctx.PlayerModel = "none"
 		return
 	}
 	ctx.PlayerModel = strings.TrimSpace(string(out))
@@ -539,7 +573,7 @@ func runPython(ctx *CognitiveContext) {
 			"manipulation": ctx.RBrain.Manipulation,
 			"trust":        ctx.RBrain.TrustLevel,
 			"dominant":     ctx.RBrain.DominantIntent,
-			"model":        ctx.PlayerModel,
+			"inferences":   ctx.PlayerModel,
 		},
 	})
 	pythonBin := os.Getenv("CHAOS2_PYTHON_BIN")

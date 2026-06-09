@@ -1,35 +1,69 @@
 % Chaos2 — mirror module
-% Prolog: builds internal model of the player from interaction history
-% Query: model(SessionId, Properties)
+% R observes and remembers. Prolog interprets and infers.
+% Facts are asserted per-call from R's exported state.
+% Prolog is stateless by design — it only reasons, never stores.
 
-:- module(mirror, [model/2, update_model/3]).
+:- module(mirror, [print_inferences/1]).
 
 :- dynamic player_fact/3.
 
-model(SessionId, Properties) :-
-    findall(Key-Value, player_fact(SessionId, Key, Value), Facts),
-    ( Facts = [] ->
-        Properties = [type-unknown, trust-0.0, threat-low, dominant-unknown]
+% ── Inferences ────────────────────────────────────────────────────────────────
+
+% Deliberate escalation: sustained aggression + trajectory going up
+escalating_deliberately(S) :-
+    player_fact(S, aggression_count, A), A > 5,
+    player_fact(S, emotional_drift, escalating).
+
+% Testing limits: provocation is the dominant pattern
+testing_limits(S) :-
+    player_fact(S, provocation_count, P), P > 3,
+    player_fact(S, dominant, provocation).
+
+% Manipulation: aggression and trust alternating in close ratio
+manipulating(S) :-
+    player_fact(S, aggression_count, A), A > 2,
+    player_fact(S, trust_count, T), T > 2,
+    player_fact(S, total, N), N > 5,
+    Ratio is abs(A - T) / N,
+    Ratio < 0.2.
+
+% Attached: intimacy + trust building
+attached(S) :-
+    player_fact(S, intimacy_count, I), I > 3,
+    player_fact(S, trust_count, T), T > 2.
+
+% Withdrawing: pulling back consistently
+withdrawing(S) :-
+    player_fact(S, withdrawal_count, W), W > 3,
+    player_fact(S, total, N), N > 0,
+    Ratio is W / N,
+    Ratio > 0.4.
+
+% Using philosophy as refuge: ideas instead of contact
+using_philosophy(S) :-
+    player_fact(S, philosophical_count, P), P > 3,
+    player_fact(S, intimacy_count, I), I < 2,
+    player_fact(S, trust_count, T), T < 2.
+
+% Oscillating: erratic pattern across intent types
+oscillating(S) :-
+    player_fact(S, volatility, erratic).
+
+% ── Output ────────────────────────────────────────────────────────────────────
+
+active_inference(S, escalating_deliberately) :- escalating_deliberately(S).
+active_inference(S, testing_limits)          :- testing_limits(S).
+active_inference(S, manipulating)            :- manipulating(S).
+active_inference(S, attached)                :- attached(S).
+active_inference(S, withdrawing)             :- withdrawing(S).
+active_inference(S, using_philosophy)        :- using_philosophy(S).
+active_inference(S, oscillating)             :- oscillating(S).
+
+print_inferences(S) :-
+    findall(I, active_inference(S, I), List),
+    ( List = [] ->
+        format("none~n")
     ;
-        Properties = Facts
-    ).
-
-update_model(SessionId, Key, Value) :-
-    retractall(player_fact(SessionId, Key, _)),
-    assertz(player_fact(SessionId, Key, Value)).
-
-archetype(SessionId, Archetype) :-
-    ( player_fact(SessionId, type, T) -> Archetype = T ; Archetype = unknown ).
-
-trust_level(SessionId, Trust) :-
-    ( player_fact(SessionId, trust, T) -> Trust = T ; Trust = 0.0 ).
-
-is_threat(SessionId) :-
-    player_fact(SessionId, threat, high).
-
-print_model(SessionId) :-
-    model(SessionId, Props),
-    forall(
-        member(Key-Value, Props),
-        format("~w=~w~n", [Key, Value])
+        atomic_list_concat(List, ',', Atom),
+        format("~w~n", [Atom])
     ).
