@@ -6,3 +6,17 @@ instinct/model_weights.h
 *.db
 __pycache__/
 *.pyc
+
+# compiled binaries
+chaos2_router
+regulation/regulation
+regulation/regulation.hi
+regulation/regulation.o
+silence/silence
+silence/silence.o
+
+# build artifacts
+forgetting/target/
+
+# Redis
+dump.rdb
