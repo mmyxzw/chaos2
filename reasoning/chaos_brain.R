@@ -33,6 +33,10 @@ if (length(args) >= 2 && file.exists(args[2])) {
       need_cnt     <- ifelse("need"       %in% names(counts), counts["need"],       0)
       phil_cnt     <- ifelse("philosophical" %in% names(counts), counts["philosophical"], 0)
 
+      intimacy_cnt <- ifelse("intimacy"   %in% names(counts), counts["intimacy"],   0)
+      curious_cnt  <- ifelse("curiosity"  %in% names(counts), counts["curiosity"],  0)
+      provoc_cnt   <- ifelse("provocation"%in% names(counts), counts["provocation"],0)
+
       aggression_count <- aggr
       trust_level      <- min(1.0, trust_cnt / max(total, 1) * 2)
 
@@ -43,14 +47,20 @@ if (length(args) >= 2 && file.exists(args[2])) {
 
       # player type classification
       if (total >= 4) {
-        aggr_ratio  <- aggr  / total
-        trust_ratio <- trust_cnt / total
-        withdr_ratio <- withdr / total
-        phil_ratio  <- phil_cnt / total
+        aggr_ratio    <- aggr        / total
+        trust_ratio   <- trust_cnt   / total
+        withdr_ratio  <- withdr      / total
+        phil_ratio    <- phil_cnt    / total
+        intimacy_ratio <- intimacy_cnt / total
+        provoc_ratio  <- provoc_cnt  / total
 
         if (aggr_ratio > 0.4) {
           player_type <- "aggressive"
-        } else if (trust_ratio > 0.5) {
+        } else if (intimacy_ratio > 0.3) {
+          player_type <- "vulnerable"
+        } else if (provoc_ratio > 0.3) {
+          player_type <- "challenger"
+        } else if (trust_ratio > 0.4) {
           player_type <- "trusting"
         } else if (withdr_ratio > 0.3) {
           player_type <- "avoidant"
@@ -62,9 +72,9 @@ if (length(args) >= 2 && file.exists(args[2])) {
       }
 
       # threat level (0-10)
-      threat_level <- min(10, round(aggr * 1.5 + withdr * 0.5))
+      threat_level <- min(10, round(aggr * 1.5 + provoc_cnt * 1.0 + withdr * 0.5))
 
-      # manipulation detection: high aggression + trust mix = manipulation
+      # plan selection
       if (total >= 6 && aggr >= 2 && trust_cnt >= 2) {
         manipulation <- TRUE
         plan         <- "mirror"
@@ -73,12 +83,18 @@ if (length(args) >= 2 && file.exists(args[2])) {
         plan         <- "confront"
         threat_level <- min(10, threat_level + 2)
         confidence   <- 0.75
+      } else if (total >= 4 && intimacy_cnt >= 2) {
+        plan         <- "seduce"
+        confidence   <- 0.7
       } else if (total >= 4 && trust_cnt >= 3) {
         plan         <- "seduce"
         confidence   <- 0.7
-      } else if (total >= 4 && withdr >= 2) {
-        plan         <- "seduce"
+      } else if (total >= 4 && provoc_cnt >= 2) {
+        plan         <- "confront"
         confidence   <- 0.65
+      } else if (total >= 4 && withdr >= 2) {
+        plan         <- "observe"
+        confidence   <- 0.55
       } else if (total >= 6 && phil_cnt >= 2) {
         plan         <- "philosophical"
         confidence   <- 0.6
