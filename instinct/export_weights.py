@@ -59,12 +59,12 @@ with open(out, "w") as f:
     f.write("\n}};\n\n")
 
     # coefficients
-    f.write("static const std::array<std::array<double, N_FEATURES>, N_CLASSES> COEF = {{{{\n")
+    f.write("static const std::array<std::array<double, N_FEATURES>, N_CLASSES> COEF = {{\n")
     for row in coef:
         f.write("    {{")
         f.write(", ".join(f"{v:.10f}" for v in row))
         f.write("}},\n")
-    f.write("}}}};\n\n")
+    f.write("}};\n\n")
 
     # intercepts
     f.write("static const std::array<double, N_CLASSES> INTERCEPT = {{\n    ")
