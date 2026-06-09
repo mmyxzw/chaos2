@@ -1,7 +1,6 @@
 .venv/
 .env
 instinct/instinct_classifier
-instinct/model_weights.h
 *.csv
 *.db
 __pycache__/
