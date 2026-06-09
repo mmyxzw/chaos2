@@ -67,9 +67,8 @@ pip install -q scikit-learn numpy redis
 
 log "Building C++ instinct classifier..."
 cd "$REPO/instinct"
-if [ ! -f build/instinct ] || [ src/main.cpp -nt build/instinct ]; then
-  mkdir -p build
-  g++ -O2 -std=c++17 -o build/instinct src/main.cpp
+if [ ! -f instinct_classifier ] || [ classifier.cpp -nt instinct_classifier ]; then
+  g++ -O2 -std=c++17 -o instinct_classifier classifier.cpp
 fi
 cd "$REPO"
 
