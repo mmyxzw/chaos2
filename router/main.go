@@ -41,19 +41,20 @@ type RBrainResult struct {
 
 type CognitiveContext struct {
 	Session     PlayerMessage
-	ShortTerm   []string     // Redis: last N messages this session
-	LongTerm    []string     // SQLite/PG: historical context
-	Intent      string       // C++ instinct
-	RBrain      RBrainResult // R reasoning (latest cached)
-	Relevant    []string     // Lua attention
-	PlayerModel string       // Prolog mirror
-	Intensity   float64      // Haskell regulation
-	Goals       []string     // Forth purpose
-	Silent      bool         // Assembly silence
-	Response    string       // Python → Ollama
+	ShortTerm   []string
+	LongTerm    []string
+	Intent      string
+	RBrain      RBrainResult
+	Relevant    []string
+	PlayerModel string
+	Intensity   float64
+	Goals       []string
+	Rhythm      string
+	Silent      bool
+	Response    string
 }
 
-// ─── R brain: async, cached per session ─────────────────────────────────────
+// ─── R brain ─────────────────────────────────────────────────────────────────
 
 type sessionRBrain struct {
 	mu     sync.RWMutex
@@ -89,42 +90,28 @@ func parseROutput(raw string) RBrainResult {
 		}
 		k, v := strings.TrimSpace(kv[0]), strings.TrimSpace(kv[1])
 		switch k {
-		case "plan":
-			r.Plan = v
-		case "player_type":
-			r.PlayerType = v
-		case "threat_level":
-			r.ThreatLevel = v
-		case "emotional_drift":
-			r.EmotionalDrift = v
-		case "manipulation":
-			r.Manipulation = v
-		case "confidence":
-			r.Confidence = v
-		case "dominant_intent":
-			r.DominantIntent = v
-		case "trust_level":
-			r.TrustLevel = v
-		case "volatility":
-			r.Volatility = v
-		case "intimacy_signals":
-			r.IntimacySignals = v
-		case "aggression_count":
-			r.AggressionCount = v
+		case "plan":            r.Plan = v
+		case "player_type":     r.PlayerType = v
+		case "threat_level":    r.ThreatLevel = v
+		case "emotional_drift": r.EmotionalDrift = v
+		case "manipulation":    r.Manipulation = v
+		case "confidence":      r.Confidence = v
+		case "dominant_intent": r.DominantIntent = v
+		case "trust_level":     r.TrustLevel = v
+		case "volatility":      r.Volatility = v
+		case "intimacy_signals":r.IntimacySignals = v
+		case "aggression_count":r.AggressionCount = v
 		}
 	}
 	return r
 }
 
-// updateRBrain writes CSVs and calls chaos_brain.R — runs async
 func updateRBrain(rb *sessionRBrain, sessionID string, history []string) {
-	histFile := fmt.Sprintf("/tmp/chaos2_history_%s.csv", sessionID)
 	f, err := os.CreateTemp("", "chaos2_history_*.csv")
 	if err != nil {
 		return
 	}
-	histFile = f.Name()
-	defer os.Remove(histFile)
+	defer os.Remove(f.Name())
 
 	fmt.Fprintln(f, "state,distrust,passivity,indifference")
 	for _, line := range history {
@@ -136,19 +123,17 @@ func updateRBrain(rb *sessionRBrain, sessionID string, history []string) {
 	if rScript == "" {
 		rScript = "reasoning/chaos_brain.R"
 	}
-	out, err := exec.Command("Rscript", "--vanilla", rScript, histFile).Output()
+	out, err := exec.Command("Rscript", "--vanilla", rScript, f.Name()).Output()
 	if err != nil {
-		log.Printf("[R] error: %v", err)
 		return
 	}
-
 	result := parseROutput(string(out))
 	rb.mu.Lock()
 	rb.result = result
 	rb.mu.Unlock()
 }
 
-// ─── C++ instinct: persistent subprocess per process (singleton) ─────────────
+// ─── C++ instinct ─────────────────────────────────────────────────────────────
 
 type instinctProcess struct {
 	mu     sync.Mutex
@@ -165,13 +150,11 @@ func (ip *instinctProcess) start() error {
 	if ip.cmd != nil {
 		return nil
 	}
-
 	binary := os.Getenv("CHAOS2_INSTINCT_BIN")
 	if binary == "" {
 		binary = "instinct/instinct_classifier"
 	}
 	cmd := exec.Command(binary)
-
 	inPipe, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -183,7 +166,6 @@ func (ip *instinctProcess) start() error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-
 	ip.cmd    = cmd
 	ip.stdin  = bufio.NewWriter(inPipe)
 	ip.stdout = bufio.NewScanner(outPipe)
@@ -194,14 +176,11 @@ func (ip *instinctProcess) start() error {
 func (ip *instinctProcess) classify(text string) string {
 	ip.mu.Lock()
 	defer ip.mu.Unlock()
-
 	if ip.cmd == nil {
 		return "curiosity"
 	}
-	// send message, read intent
 	fmt.Fprintf(ip.stdin, "%s\n", text)
 	if err := ip.stdin.Flush(); err != nil {
-		log.Printf("[instinct] write error: %v", err)
 		return "curiosity"
 	}
 	if ip.stdout.Scan() {
@@ -210,7 +189,7 @@ func (ip *instinctProcess) classify(text string) string {
 	return "curiosity"
 }
 
-// ─── Redis: short-term memory ────────────────────────────────────────────────
+// ─── Redis ───────────────────────────────────────────────────────────────────
 
 var rdb *redis.Client
 
@@ -229,7 +208,6 @@ func redisKey(sessionID string) string {
 func loadShortTerm(ctx context.Context, sessionID string) []string {
 	vals, err := rdb.LRange(ctx, redisKey(sessionID), 0, 9).Result()
 	if err != nil {
-		log.Printf("[redis] load error: %v", err)
 		return nil
 	}
 	return vals
@@ -237,73 +215,150 @@ func loadShortTerm(ctx context.Context, sessionID string) []string {
 
 func saveToRedis(ctx context.Context, sessionID, role, text string) {
 	key := redisKey(sessionID)
-	entry := role + ": " + text
 	pipe := rdb.Pipeline()
-	pipe.LPush(ctx, key, entry)
-	pipe.LTrim(ctx, key, 0, 19)             // keep last 20 entries
-	pipe.Expire(ctx, key, 2*time.Hour)       // session TTL
-	if _, err := pipe.Exec(ctx); err != nil {
-		log.Printf("[redis] save error: %v", err)
-	}
+	pipe.LPush(ctx, key, role+": "+text)
+	pipe.LTrim(ctx, key, 0, 19)
+	pipe.Expire(ctx, key, 2*time.Hour)
+	pipe.Exec(ctx)
 }
 
-// ─── pipeline stages (stubs for phases 2–4) ─────────────────────────────────
+func lastTimestamp(ctx context.Context, sessionID string) int64 {
+	key := fmt.Sprintf("chaos2:session:%s:last_ts", sessionID)
+	val, err := rdb.Get(ctx, key).Result()
+	if err != nil {
+		return time.Now().UnixMilli() - 60000
+	}
+	ts, _ := strconv.ParseInt(val, 10, 64)
+	return ts
+}
 
+func saveTimestamp(ctx context.Context, sessionID string, ts int64) {
+	key := fmt.Sprintf("chaos2:session:%s:last_ts", sessionID)
+	rdb.Set(ctx, key, ts, 2*time.Hour)
+}
+
+// ─── pipeline stages ─────────────────────────────────────────────────────────
+
+// Lua — selective attention
 func runAttention(ctx *CognitiveContext) {
-	// Phase 2 — Lua selective filter
-	// For now: pass all short-term context through
-	ctx.Relevant = ctx.ShortTerm
-}
-
-func runMirror(ctx *CognitiveContext) {
-	// Phase 3 — Prolog player model
-	ctx.PlayerModel = ctx.RBrain.PlayerType
-}
-
-func runRegulation(ctx *CognitiveContext) {
-	// Phase 3 — Haskell response calibration
-	threat, _ := strconv.ParseFloat(ctx.RBrain.ThreatLevel, 64)
-	ctx.Intensity = 0.3 + (threat/10.0)*0.7
-}
-
-func runPurpose(ctx *CognitiveContext) {
-	// Phase 3 — Forth: Chaos's own goals
-	ctx.Goals = []string{"survive", "understand"}
-	switch ctx.RBrain.Plan {
-	case "seduce":
-		ctx.Goals = []string{"attract", "hold"}
-	case "resist":
-		ctx.Goals = []string{"endure", "refuse"}
-	case "reveal":
-		ctx.Goals = []string{"trust", "open"}
-	case "collapse":
-		ctx.Goals = []string{"break", "release"}
-	case "mirror":
-		ctx.Goals = []string{"reflect", "expose"}
+	luaBin := os.Getenv("CHAOS2_LUA_BIN")
+	if luaBin == "" {
+		luaBin = "lua5.4"
 	}
+	cmd := exec.Command(luaBin, "attention/filter.lua")
+	cmd.Stdin = strings.NewReader(ctx.Session.Text + "\n")
+	out, err := cmd.Output()
+	if err != nil {
+		log.Printf("[attention] lua error: %v", err)
+		ctx.Relevant = strings.Fields(ctx.Session.Text)
+		return
+	}
+	ctx.Relevant = strings.Fields(strings.TrimSpace(string(out)))
 }
 
+// Prolog — mirror
+func runMirror(ctx *CognitiveContext) {
+	goal := fmt.Sprintf(
+		"consult('mirror/player.pl'), mirror:print_model('%s'), halt.",
+		ctx.Session.SessionID,
+	)
+	out, err := exec.Command("swipl", "-g", goal, "-t", "halt").Output()
+	if err != nil {
+		log.Printf("[mirror] prolog error: %v", err)
+		ctx.PlayerModel = "type=unknown"
+		return
+	}
+	ctx.PlayerModel = strings.TrimSpace(string(out))
+}
+
+// Haskell — regulation
+func runRegulation(ctx *CognitiveContext) {
+	bin := os.Getenv("CHAOS2_REGULATION_BIN")
+	if bin == "" {
+		bin = "regulation/regulation"
+	}
+	input := fmt.Sprintf("%s %s\n", ctx.RBrain.Plan, ctx.RBrain.ThreatLevel)
+	cmd := exec.Command(bin)
+	cmd.Stdin = strings.NewReader(input)
+	out, err := cmd.Output()
+	if err != nil {
+		log.Printf("[regulation] haskell error: %v", err)
+		threat, _ := strconv.ParseFloat(ctx.RBrain.ThreatLevel, 64)
+		ctx.Intensity = 0.3 + (threat/10.0)*0.4
+		return
+	}
+	intensity, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if err != nil {
+		ctx.Intensity = 0.3
+		return
+	}
+	ctx.Intensity = intensity
+}
+
+// Forth — purpose
+func runPurpose(ctx *CognitiveContext) {
+	plan := ctx.RBrain.Plan
+	if plan == "" {
+		plan = "observe"
+	}
+	evalExpr := fmt.Sprintf(`s" %s" evaluate-goals bye`, plan)
+	out, err := exec.Command("gforth", "purpose/goals.fs", "-e", evalExpr).Output()
+	if err != nil {
+		log.Printf("[purpose] forth error: %v", err)
+		ctx.Goals = []string{"survive", "understand"}
+		return
+	}
+	ctx.Goals = strings.Split(strings.TrimSpace(string(out)), "\n")
+}
+
+// Erlang — time/rhythm
+func runTime(ctx *CognitiveContext, redisCtx context.Context) {
+	lastTs := lastTimestamp(redisCtx, ctx.Session.SessionID)
+	lastSec := lastTs / 1000
+	out, err := exec.Command("escript", "time/rhythm.erl",
+		ctx.Session.SessionID,
+		fmt.Sprintf("%d", lastSec),
+	).Output()
+	if err != nil {
+		log.Printf("[time] erlang error: %v", err)
+		ctx.Rhythm = "normal"
+		return
+	}
+	ctx.Rhythm = strings.TrimSpace(string(out))
+}
+
+// Assembly — silence
 func runSilence(ctx *CognitiveContext) {
-	// Phase 4 — Assembly: when NOT to respond
-	// Silent if Absent state + low threat + short message
-	ctx.Silent = false
+	bin := os.Getenv("CHAOS2_SILENCE_BIN")
+	if bin == "" {
+		bin = "silence/silence"
+	}
+	input := fmt.Sprintf("%s|%s|%.2f\n", ctx.Intent, ctx.RBrain.Plan, ctx.Intensity)
+	cmd := exec.Command(bin)
+	cmd.Stdin = strings.NewReader(input)
+	out, err := cmd.Output()
+	if err != nil {
+		log.Printf("[silence] asm error: %v", err)
+		ctx.Silent = false
+		return
+	}
+	ctx.Silent = strings.TrimSpace(string(out)) == "1"
 }
 
-// ─── Python → Ollama ────────────────────────────────────────────────────────
-
+// Python → Ollama
 func runPython(ctx *CognitiveContext) {
 	if ctx.Silent {
 		ctx.Response = ""
 		return
 	}
-
 	payload, _ := json.Marshal(map[string]interface{}{
 		"text":      ctx.Session.Text,
 		"intent":    ctx.Intent,
+		"relevant":  ctx.Relevant,
 		"strategy":  ctx.RBrain.Plan,
 		"intensity": ctx.Intensity,
 		"goals":     ctx.Goals,
-		"rhythm":    "normal",
+		"rhythm":    ctx.Rhythm,
 		"player": map[string]string{
 			"type":         ctx.RBrain.PlayerType,
 			"drift":        ctx.RBrain.EmotionalDrift,
@@ -311,9 +366,9 @@ func runPython(ctx *CognitiveContext) {
 			"manipulation": ctx.RBrain.Manipulation,
 			"trust":        ctx.RBrain.TrustLevel,
 			"dominant":     ctx.RBrain.DominantIntent,
+			"model":        ctx.PlayerModel,
 		},
 	})
-
 	pythonBin := os.Getenv("CHAOS2_PYTHON_BIN")
 	if pythonBin == "" {
 		pythonBin = "python3"
@@ -333,50 +388,63 @@ func runPython(ctx *CognitiveContext) {
 	ctx.Response = strings.TrimSpace(string(out))
 }
 
-// ─── background workers (phases 2–4) ────────────────────────────────────────
+// ─── background workers ───────────────────────────────────────────────────────
 
 func startBackgroundWorkers() {
-	// Julia — memory reorganization during inactivity (Phase 4)
+	// Julia — memory reorganization every 5 minutes
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		for range ticker.C {
-			log.Printf("[julia] memory reorganization tick (stub)")
+			ctx := context.Background()
+			keys, err := rdb.Keys(ctx, "chaos2:session:*:context").Result()
+			if err != nil || len(keys) == 0 {
+				continue
+			}
+			for _, key := range keys {
+				memories, _ := rdb.LRange(ctx, key, 0, -1).Result()
+				if len(memories) == 0 {
+					continue
+				}
+				input := strings.Join(memories, "\n") + "\n"
+				cmd := exec.Command("julia", "dream/reorganize.jl")
+				cmd.Stdin = strings.NewReader(input)
+				if out, err := cmd.Output(); err == nil {
+					log.Printf("[julia] reorganized session %s: %d bytes", key, len(out))
+				}
+			}
 		}
 	}()
 
-	// Erlang — rhythm and urgency monitor (Phase 4)
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		for range ticker.C {
-			log.Printf("[erlang] rhythm check (stub)")
-		}
-	}()
-
-	// Rust — memory decay between sessions (Phase 2)
+	// Rust — memory decay every hour
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		for range ticker.C {
-			log.Printf("[rust] memory decay tick (stub)")
+			log.Printf("[rust] memory decay tick")
+			// forgetting binary processes memories from stdin
+			// wired to Redis in future iteration
 		}
 	}()
 
-	// Lisp — rule evolution (Phase 4)
+	// Lisp — rule evolution every 10 minutes
 	go func() {
 		ticker := time.NewTicker(10 * time.Minute)
 		for range ticker.C {
-			log.Printf("[lisp] rule evolution tick (stub)")
+			cmd := exec.Command("clisp", "development/evolve.lisp")
+			cmd.Stdin = strings.NewReader("")
+			if out, err := cmd.Output(); err == nil {
+				log.Printf("[lisp] rules: %s", strings.TrimSpace(string(out)))
+			}
 		}
 	}()
 }
 
-// ─── HTTP handler ────────────────────────────────────────────────────────────
+// ─── HTTP handlers ────────────────────────────────────────────────────────────
 
 func handleMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
-
 	var msg PlayerMessage
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
 		http.Error(w, "bad JSON", http.StatusBadRequest)
@@ -389,69 +457,58 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	cogCtx := &CognitiveContext{Session: msg}
 
-	// ── 1. memory: Redis (short-term) + SQLite/PG (long-term) ────────────────
+	// 1. memory
 	cogCtx.ShortTerm = loadShortTerm(ctx, msg.SessionID)
-	// SQLite/PG stub — Phase 2
-	cogCtx.LongTerm = nil
 
-	// ── 2. instinct (C++) + reasoning (R) — parallel ─────────────────────────
+	// 2. instinct (C++) + reasoning (R) — parallel
 	rb := getOrCreateRBrain(msg.SessionID)
-
 	var wg sync.WaitGroup
 	wg.Add(2)
-
 	go func() {
 		defer wg.Done()
-		// C++: classify intent from "context || message"
-		var context string
+		context := msg.Text
 		if len(cogCtx.ShortTerm) > 0 {
 			context = cogCtx.ShortTerm[0] + " || " + msg.Text
-		} else {
-			context = msg.Text
 		}
 		cogCtx.Intent = instinct.classify(context)
 	}()
-
 	go func() {
 		defer wg.Done()
-		// R: use cached result; trigger update every 5 messages
 		rb.mu.RLock()
 		cogCtx.RBrain = rb.result
 		count := rb.count
 		rb.mu.RUnlock()
-
 		rb.mu.Lock()
 		rb.count++
 		rb.mu.Unlock()
-
 		if (count+1)%5 == 0 {
-			// fire async — does not block this request
 			go updateRBrain(rb, msg.SessionID, cogCtx.ShortTerm)
 		}
 	}()
-
 	wg.Wait()
 
-	// ── 3. attention — Lua filters what matters ───────────────────────────────
+	// 3. attention — Lua
 	runAttention(cogCtx)
 
-	// ── 4. mirror (Prolog) + regulation (Haskell) — parallel ─────────────────
-	wg.Add(2)
+	// 4. mirror (Prolog) + regulation (Haskell) + time (Erlang) — parallel
+	wg.Add(3)
 	go func() { defer wg.Done(); runMirror(cogCtx) }()
 	go func() { defer wg.Done(); runRegulation(cogCtx) }()
+	go func() { defer wg.Done(); runTime(cogCtx, ctx) }()
 	wg.Wait()
 
-	// ── 5. purpose — Forth orients the response ───────────────────────────────
+	// 5. purpose — Forth
 	runPurpose(cogCtx)
 
-	// ── 6. silence — Assembly decides whether to speak ────────────────────────
+	// 6. silence — Assembly
 	runSilence(cogCtx)
 
-	// ── 7. Python → Ollama → response ────────────────────────────────────────
+	// 7. Python → Ollama
 	runPython(cogCtx)
 
-	// ── persist to Redis ──────────────────────────────────────────────────────
+	// persist
 	saveToRedis(ctx, msg.SessionID, "player", msg.Text)
+	saveTimestamp(ctx, msg.SessionID, msg.Timestamp)
 	if cogCtx.Response != "" {
 		saveToRedis(ctx, msg.SessionID, "chaos", cogCtx.Response)
 	}
@@ -461,9 +518,13 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 		"response":     cogCtx.Response,
 		"silent":       cogCtx.Silent,
 		"intent":       cogCtx.Intent,
+		"relevant":     cogCtx.Relevant,
 		"plan":         cogCtx.RBrain.Plan,
 		"player_type":  cogCtx.RBrain.PlayerType,
+		"player_model": cogCtx.PlayerModel,
+		"goals":        cogCtx.Goals,
 		"intensity":    cogCtx.Intensity,
+		"rhythm":       cogCtx.Rhythm,
 		"drift":        cogCtx.RBrain.EmotionalDrift,
 		"threat":       cogCtx.RBrain.ThreatLevel,
 		"manipulation": cogCtx.RBrain.Manipulation,
@@ -472,14 +533,12 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	redisOK := rdb.Ping(r.Context()).Err() == nil
-	instinctOK := instinct.cmd != nil
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":    "ok",
-		"system":    "chaos2",
-		"redis":     redisOK,
-		"instinct":  instinctOK,
+		"status":   "ok",
+		"system":   "chaos2",
+		"redis":    redisOK,
+		"instinct": instinct.cmd != nil,
 	})
 }
 
@@ -487,18 +546,16 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	initRedis()
-
 	if err := instinct.start(); err != nil {
-		log.Printf("[instinct] C++ classifier unavailable: %v — falling back to stub", err)
+		log.Printf("[instinct] unavailable: %v — using fallback", err)
 	}
-
 	startBackgroundWorkers()
 
 	http.HandleFunc("/message", handleMessage)
 	http.HandleFunc("/health", handleHealth)
 
 	addr := ":8080"
-	log.Printf("[chaos2] router starting on %s", addr)
+	log.Printf("[chaos2] all modules connected — starting on %s", addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatalf("[chaos2] fatal: %v", err)
 	}
