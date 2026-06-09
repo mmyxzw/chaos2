@@ -184,31 +184,70 @@ func transitionState(ctx context.Context, sessionID, intent, plan string) string
 	return newState
 }
 
-// ─── R brain ─────────────────────────────────────────────────────────────────
+// ─── R brain daemon ──────────────────────────────────────────────────────────
 
-type sessionRBrain struct {
-	mu     sync.RWMutex
-	result RBrainResult
-	count  int
+type rDaemonProcess struct {
+	mu     sync.Mutex
+	cmd    *exec.Cmd
+	stdin  *bufio.Writer
+	stdout *bufio.Scanner
 }
 
-var (
-	rBrains   = make(map[string]*sessionRBrain)
-	rBrainsMu sync.Mutex
-)
+var rDaemon = &rDaemonProcess{}
 
-func getOrCreateRBrain(sessionID string) *sessionRBrain {
-	rBrainsMu.Lock()
-	defer rBrainsMu.Unlock()
-	if rb, ok := rBrains[sessionID]; ok {
-		return rb
+func (rd *rDaemonProcess) start() error {
+	rd.mu.Lock()
+	defer rd.mu.Unlock()
+	if rd.cmd != nil {
+		return nil
 	}
-	rb := &sessionRBrain{result: RBrainResult{
-		Plan: "observe", PlayerType: "unknown", ThreatLevel: "0",
-		EmotionalDrift: "stable", Manipulation: "false",
-	}}
-	rBrains[sessionID] = rb
-	return rb
+	script := os.Getenv("CHAOS2_R_BRAIN")
+	if script == "" {
+		script = "reasoning/chaos_brain.R"
+	}
+	cmd := exec.Command("Rscript", "--vanilla", script)
+	inPipe, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	outPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	rd.cmd    = cmd
+	rd.stdin  = bufio.NewWriter(inPipe)
+	rd.stdout = bufio.NewScanner(outPipe)
+	log.Printf("[R] daemon started (pid %d)", cmd.Process.Pid)
+	return nil
+}
+
+var rFallback = RBrainResult{
+	Plan: "observe", PlayerType: "unknown", ThreatLevel: "0",
+	EmotionalDrift: "stable", Manipulation: "false", Confidence: "0.5",
+}
+
+func (rd *rDaemonProcess) query(sessionID, intent, chaosState, trustLevel string) RBrainResult {
+	rd.mu.Lock()
+	defer rd.mu.Unlock()
+	if rd.cmd == nil {
+		return rFallback
+	}
+	fmt.Fprintf(rd.stdin, "%s|%s|%s|%s\n", sessionID, intent, chaosState, trustLevel)
+	if err := rd.stdin.Flush(); err != nil {
+		log.Printf("[R] write error: %v — restarting", err)
+		rd.cmd = nil
+		return rFallback
+	}
+	if rd.stdout.Scan() {
+		return parseROutput(rd.stdout.Text())
+	}
+	log.Printf("[R] daemon died — restarting")
+	rd.cmd = nil
+	return rFallback
 }
 
 func parseROutput(raw string) RBrainResult {
@@ -220,77 +259,40 @@ func parseROutput(raw string) RBrainResult {
 		}
 		k, v := strings.TrimSpace(kv[0]), strings.TrimSpace(kv[1])
 		switch k {
-		case "plan":            r.Plan = v
-		case "player_type":     r.PlayerType = v
-		case "threat_level":    r.ThreatLevel = v
-		case "emotional_drift": r.EmotionalDrift = v
-		case "manipulation":    r.Manipulation = v
-		case "confidence":      r.Confidence = v
-		case "dominant_intent": r.DominantIntent = v
-		case "trust_level":     r.TrustLevel = v
-		case "volatility":      r.Volatility = v
-		case "intimacy_signals":r.IntimacySignals = v
-		case "aggression_count":r.AggressionCount = v
+		case "plan":             r.Plan = v
+		case "player_type":      r.PlayerType = v
+		case "threat_level":     r.ThreatLevel = v
+		case "emotional_drift":  r.EmotionalDrift = v
+		case "manipulation":     r.Manipulation = v
+		case "confidence":       r.Confidence = v
+		case "dominant_intent":  r.DominantIntent = v
+		case "trust_level":      r.TrustLevel = v
+		case "volatility":       r.Volatility = v
+		case "intimacy_signals": r.IntimacySignals = v
+		case "aggression_count": r.AggressionCount = v
 		}
 	}
 	return r
+}
+
+func loadPlan(ctx context.Context, sessionID string) string {
+	key := fmt.Sprintf("chaos2:session:%s:plan", sessionID)
+	plan, err := rdb.Get(ctx, key).Result()
+	if err != nil || plan == "" {
+		return "observe"
+	}
+	return plan
+}
+
+func savePlan(ctx context.Context, sessionID, plan string) {
+	key := fmt.Sprintf("chaos2:session:%s:plan", sessionID)
+	rdb.Set(ctx, key, plan, 24*time.Hour)
 }
 
 func trackIntent(ctx context.Context, sessionID, intent string) {
 	key := fmt.Sprintf("chaos2:session:%s:intents", sessionID)
 	rdb.HIncrBy(ctx, key, intent, 1)
 	rdb.Expire(ctx, key, 24*time.Hour)
-}
-
-func updateRBrain(rb *sessionRBrain, sessionID string) {
-	ctx := context.Background()
-
-	// history CSV — stub with minimal valid rows so R doesn't bail early
-	hist, err := os.CreateTemp("", "chaos2_history_*.csv")
-	if err != nil {
-		return
-	}
-	defer os.Remove(hist.Name())
-	fmt.Fprintln(hist, "state,distrust,passivity,indifference")
-	fmt.Fprintln(hist, "Neutral,50,60,60")
-	hist.Close()
-
-	// profile CSV from Redis intent counts
-	prof, err := os.CreateTemp("", "chaos2_profile_*.csv")
-	if err != nil {
-		return
-	}
-	defer os.Remove(prof.Name())
-	fmt.Fprintln(prof, "intent,count")
-	intents, _ := rdb.HGetAll(ctx, fmt.Sprintf("chaos2:session:%s:intents", sessionID)).Result()
-	for intent, count := range intents {
-		fmt.Fprintf(prof, "%s,%s\n", intent, count)
-	}
-	prof.Close()
-
-	// trust level file
-	trustFile := prof.Name() + "_trust.txt"
-	trustVal, _ := rdb.Get(ctx, fmt.Sprintf("chaos2:session:%s:trust", sessionID)).Result()
-	if trustVal == "" {
-		trustVal = "0"
-	}
-	os.WriteFile(trustFile, []byte(trustVal), 0644)
-	defer os.Remove(trustFile)
-
-	rScript := os.Getenv("CHAOS2_R_BRAIN")
-	if rScript == "" {
-		rScript = "reasoning/chaos_brain.R"
-	}
-	out, err := exec.Command("Rscript", "--vanilla", rScript, hist.Name(), prof.Name()).Output()
-	if err != nil {
-		log.Printf("[R] error: %v", err)
-		return
-	}
-	result := parseROutput(string(out))
-	rb.mu.Lock()
-	rb.result = result
-	rb.mu.Unlock()
-	log.Printf("[R] session=%s plan=%s player=%s", sessionID, result.Plan, result.PlayerType)
 }
 
 // ─── C++ instinct ─────────────────────────────────────────────────────────────
@@ -629,59 +631,56 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 	// 1. memory
 	cogCtx.ShortTerm = loadShortTerm(ctx, msg.SessionID)
 
-	// 2. instinct (C++) + reasoning (R) — parallel
-	rb := getOrCreateRBrain(msg.SessionID)
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	// 2. instinct (C++) — classify intent
+	{
 		context := msg.Text
 		if len(cogCtx.ShortTerm) > 0 {
 			context = cogCtx.ShortTerm[0] + " || " + msg.Text
 		}
 		cogCtx.Intent = instinct.classify(context)
-	}()
-	go func() {
-		defer wg.Done()
-		rb.mu.RLock()
-		cogCtx.RBrain = rb.result
-		count := rb.count
-		rb.mu.RUnlock()
-		rb.mu.Lock()
-		rb.count++
-		rb.mu.Unlock()
-		if (count+1)%5 == 0 {
-			go updateRBrain(rb, msg.SessionID)
-		}
-	}()
-	wg.Wait()
+	}
 
-	// track intent + trust in Redis for R brain
+	// track intent + update trust
 	trackIntent(ctx, msg.SessionID, cogCtx.Intent)
-	cogCtx.ChaosState = transitionState(ctx, msg.SessionID, cogCtx.Intent, cogCtx.RBrain.Plan)
 	if cogCtx.Intent == "trust" {
 		rdb.IncrByFloat(ctx, fmt.Sprintf("chaos2:session:%s:trust", msg.SessionID), 0.08)
 	} else if cogCtx.Intent == "aggression" {
 		rdb.IncrByFloat(ctx, fmt.Sprintf("chaos2:session:%s:trust", msg.SessionID), -0.05)
 	}
 
-	// 3. attention — Lua
+	// state transition uses previous plan (loaded from Redis)
+	prevPlan := loadPlan(ctx, msg.SessionID)
+	cogCtx.ChaosState = transitionState(ctx, msg.SessionID, cogCtx.Intent, prevPlan)
+
+	// 3. R brain daemon — receives intent + fresh chaos_state every message
+	trustVal, _ := rdb.Get(ctx, fmt.Sprintf("chaos2:session:%s:trust", msg.SessionID)).Result()
+	if trustVal == "" {
+		trustVal = "0"
+	}
+	cogCtx.RBrain = rDaemon.query(msg.SessionID, cogCtx.Intent, cogCtx.ChaosState, trustVal)
+	if cogCtx.RBrain.Plan == "" {
+		cogCtx.RBrain.Plan = "observe"
+	}
+	savePlan(ctx, msg.SessionID, cogCtx.RBrain.Plan)
+
+	// 4. attention — Lua
 	runAttention(cogCtx)
 
-	// 4. mirror (Prolog) + regulation (Haskell) + time (Erlang) — parallel
+	// 5. mirror (Prolog) + regulation (Haskell) + time (Erlang) — parallel
+	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); runMirror(cogCtx) }()
 	go func() { defer wg.Done(); runRegulation(cogCtx) }()
 	go func() { defer wg.Done(); runTime(cogCtx, ctx) }()
 	wg.Wait()
 
-	// 5. purpose — Forth
+	// 6. purpose — Forth
 	runPurpose(cogCtx)
 
-	// 6. silence — Assembly
+	// 7. silence — Assembly
 	runSilence(cogCtx)
 
-	// 7. Python → Ollama
+	// 8. Python → Ollama
 	runPython(cogCtx)
 
 	// persist
@@ -727,6 +726,9 @@ func main() {
 	initRedis()
 	if err := instinct.start(); err != nil {
 		log.Printf("[instinct] unavailable: %v — using fallback", err)
+	}
+	if err := rDaemon.start(); err != nil {
+		log.Printf("[R] daemon unavailable: %v — using fallback", err)
 	}
 	startBackgroundWorkers()
 
