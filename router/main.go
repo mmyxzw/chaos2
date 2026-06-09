@@ -377,8 +377,10 @@ func loadShortTerm(ctx context.Context, sessionID string) []string {
 
 func saveToRedis(ctx context.Context, sessionID, role, text string) {
 	key := redisKey(sessionID)
+	ts  := time.Now().Unix()
+	entry := fmt.Sprintf("%d|1.0|%s: %s", ts, role, text)
 	pipe := rdb.Pipeline()
-	pipe.LPush(ctx, key, role+": "+text)
+	pipe.LPush(ctx, key, entry)
 	pipe.LTrim(ctx, key, 0, 19)
 	pipe.Expire(ctx, key, 2*time.Hour)
 	pipe.Exec(ctx)

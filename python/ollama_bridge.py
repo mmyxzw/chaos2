@@ -35,8 +35,20 @@ def build_prompt(ctx):
     voice = STATE_VOICE.get(chaos_state, STATE_VOICE["Neutral"])
     plan  = PLAN_VOICE.get(strategy, PLAN_VOICE["observe"])
 
-    # Redis is newest-first → reverse for chronological order
-    recent = "\n".join(reversed(history[:4])) if history else ""
+    # Redis is newest-first. Format: "timestamp|strength|role: text" (new)
+    # or "role: text" (old). Sort by strength, show 4 strongest oldest-first.
+    def parse_entry(e):
+        parts = e.split("|", 2)
+        if len(parts) == 3:
+            try:
+                return float(parts[1]), parts[2]
+            except ValueError:
+                pass
+        return 1.0, e
+
+    entries = [parse_entry(e) for e in history[:8]] if history else []
+    entries.sort(key=lambda x: x[0], reverse=True)
+    recent = "\n".join(content for _, content in reversed(entries[:4]))
 
     return f"""You are Chaos. One or two sentences maximum. No explanation.
 
