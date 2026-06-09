@@ -26,8 +26,8 @@ static const std::unordered_map<std::string, int> VOCABULARY = {{
     {"why",        7}, {"how",       8}, {"what",      9},
     {"wonder",    10}, {"curious",  11}, {"explain",  12}, {"understand",13},
     // intimacy (14-20)
-    {"feel",      14}, {"heart",    15}, {"soul",     16},
-    {"alone",     17}, {"sorrow",   18}, {"pain",     19}, {"love",      20},
+    {"feel",      14}, {"heart",    15}, {"miss",     16},
+    {"close",     17}, {"sorrow",   18}, {"pain",     19}, {"love",      20},
     // philosophical (21-27)
     {"exist",     21}, {"meaning",  22}, {"truth",    23},
     {"real",      24}, {"reality",  25}, {"think",    26}, {"believe",   27},
@@ -52,10 +52,8 @@ static const std::array<double, N_FEATURES> IDF = {{
     2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
 }};
 
-// COEF[class][feature]
-// Each class scores +2.0 on its own 7 features, -0.5 on all others
 static const std::array<std::array<double, N_FEATURES>, N_CLASSES> COEF = {{
-    // aggression: features 0-6
+    // aggression: 0-6
     {{ 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
@@ -63,7 +61,7 @@ static const std::array<std::array<double, N_FEATURES>, N_CLASSES> COEF = {{
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5 }},
-    // curiosity: features 7-13
+    // curiosity: 7-13
     {{-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
        2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
@@ -71,7 +69,7 @@ static const std::array<std::array<double, N_FEATURES>, N_CLASSES> COEF = {{
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5 }},
-    // intimacy: features 14-20
+    // intimacy: 14-20
     {{-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
        2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
@@ -79,7 +77,7 @@ static const std::array<std::array<double, N_FEATURES>, N_CLASSES> COEF = {{
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5 }},
-    // philosophical: features 21-27
+    // philosophical: 21-27
     {{-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
@@ -87,7 +85,7 @@ static const std::array<std::array<double, N_FEATURES>, N_CLASSES> COEF = {{
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5 }},
-    // provocation: features 28-34
+    // provocation: 28-34
     {{-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
@@ -95,7 +93,7 @@ static const std::array<std::array<double, N_FEATURES>, N_CLASSES> COEF = {{
        2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5 }},
-    // trust: features 35-41
+    // trust: 35-41
     {{-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
@@ -103,7 +101,7 @@ static const std::array<std::array<double, N_FEATURES>, N_CLASSES> COEF = {{
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
        2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5 }},
-    // withdrawal: features 42-48
+    // withdrawal: 42-48
     {{-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
       -0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,
@@ -113,6 +111,7 @@ static const std::array<std::array<double, N_FEATURES>, N_CLASSES> COEF = {{
        2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0 }},
 }};
 
+// curiosity gets a slight default bias — unknown words fall here
 static const std::array<double, N_CLASSES> INTERCEPT = {{
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0,
 }};
