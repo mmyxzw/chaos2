@@ -382,13 +382,21 @@ func runPython(ctx *CognitiveContext) {
 		return
 	}
 	payload, _ := json.Marshal(map[string]interface{}{
-		"text":      ctx.Session.Text,
-		"intent":    ctx.Intent,
-		"relevant":  ctx.Relevant,
-		"strategy":  ctx.RBrain.Plan,
+		"text":     ctx.Session.Text,
+		"intent":   ctx.Intent,
+		"strategy": ctx.RBrain.Plan,
 		"intensity": ctx.Intensity,
-		"goals":     ctx.Goals,
-		"rhythm":    ctx.Rhythm,
+		"rhythm":   ctx.Rhythm,
+		"history":  ctx.ShortTerm,
+		"state": map[string]interface{}{
+			"passivity":   100 - int(ctx.Intensity*100),
+			"distrust":    50 + int(ctx.Intensity*30),
+			"indifference": func() int {
+				if ctx.RBrain.EmotionalDrift == "calming" { return 30 }
+				if ctx.RBrain.EmotionalDrift == "escalating" { return 20 }
+				return 60
+			}(),
+		},
 		"player": map[string]string{
 			"type":         ctx.RBrain.PlayerType,
 			"drift":        ctx.RBrain.EmotionalDrift,
