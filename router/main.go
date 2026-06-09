@@ -561,6 +561,50 @@ func runPython(ctx *CognitiveContext) {
 	ctx.Response = strings.TrimSpace(string(out))
 }
 
+// runForgetting applies exponential memory decay across all active sessions.
+func runForgetting() {
+	bin := os.Getenv("CHAOS2_FORGETTING_BIN")
+	if bin == "" {
+		bin = "forgetting/target/release/forgetting"
+	}
+	ctx := context.Background()
+	keys, err := rdb.Keys(ctx, "chaos2:session:*:context").Result()
+	if err != nil || len(keys) == 0 {
+		return
+	}
+	for _, key := range keys {
+		memories, err := rdb.LRange(ctx, key, 0, -1).Result()
+		if err != nil || len(memories) == 0 {
+			continue
+		}
+		input := strings.Join(memories, "\n") + "\n"
+		cmd := exec.Command(bin)
+		cmd.Stdin = strings.NewReader(input)
+		out, err := cmd.Output()
+		if err != nil {
+			log.Printf("[forgetting] error on %s: %v", key, err)
+			continue
+		}
+		survived := strings.Split(strings.TrimSpace(string(out)), "\n")
+		if len(survived) == 0 || (len(survived) == 1 && survived[0] == "") {
+			// all decayed — remove the key
+			rdb.Del(ctx, key)
+			continue
+		}
+		// atomically replace the list with the decayed version
+		pipe := rdb.Pipeline()
+		pipe.Del(ctx, key)
+		for _, m := range survived {
+			pipe.RPush(ctx, key, m)
+		}
+		pipe.Expire(ctx, key, 2*time.Hour)
+		if _, err := pipe.Exec(ctx); err != nil {
+			log.Printf("[forgetting] write error on %s: %v", key, err)
+		}
+	}
+	log.Printf("[forgetting] decay applied to %d sessions", len(keys))
+}
+
 // ─── background workers ───────────────────────────────────────────────────────
 
 func startBackgroundWorkers() {
@@ -592,9 +636,7 @@ func startBackgroundWorkers() {
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		for range ticker.C {
-			log.Printf("[rust] memory decay tick")
-			// forgetting binary processes memories from stdin
-			// wired to Redis in future iteration
+			runForgetting()
 		}
 	}()
 
