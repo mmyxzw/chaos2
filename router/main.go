@@ -106,31 +106,61 @@ func parseROutput(raw string) RBrainResult {
 	return r
 }
 
-func updateRBrain(rb *sessionRBrain, sessionID string, history []string) {
-	f, err := os.CreateTemp("", "chaos2_history_*.csv")
+func trackIntent(ctx context.Context, sessionID, intent string) {
+	key := fmt.Sprintf("chaos2:session:%s:intents", sessionID)
+	rdb.HIncrBy(ctx, key, intent, 1)
+	rdb.Expire(ctx, key, 24*time.Hour)
+}
+
+func updateRBrain(rb *sessionRBrain, sessionID string) {
+	ctx := context.Background()
+
+	// history CSV — stub with minimal valid rows so R doesn't bail early
+	hist, err := os.CreateTemp("", "chaos2_history_*.csv")
 	if err != nil {
 		return
 	}
-	defer os.Remove(f.Name())
+	defer os.Remove(hist.Name())
+	fmt.Fprintln(hist, "state,distrust,passivity,indifference")
+	fmt.Fprintln(hist, "Neutral,50,60,60")
+	hist.Close()
 
-	fmt.Fprintln(f, "state,distrust,passivity,indifference")
-	for _, line := range history {
-		fmt.Fprintln(f, line)
+	// profile CSV from Redis intent counts
+	prof, err := os.CreateTemp("", "chaos2_profile_*.csv")
+	if err != nil {
+		return
 	}
-	f.Close()
+	defer os.Remove(prof.Name())
+	fmt.Fprintln(prof, "intent,count")
+	intents, _ := rdb.HGetAll(ctx, fmt.Sprintf("chaos2:session:%s:intents", sessionID)).Result()
+	for intent, count := range intents {
+		fmt.Fprintf(prof, "%s,%s\n", intent, count)
+	}
+	prof.Close()
+
+	// trust level file
+	trustFile := prof.Name() + "_trust.txt"
+	trustVal, _ := rdb.Get(ctx, fmt.Sprintf("chaos2:session:%s:trust", sessionID)).Result()
+	if trustVal == "" {
+		trustVal = "0"
+	}
+	os.WriteFile(trustFile, []byte(trustVal), 0644)
+	defer os.Remove(trustFile)
 
 	rScript := os.Getenv("CHAOS2_R_BRAIN")
 	if rScript == "" {
 		rScript = "reasoning/chaos_brain.R"
 	}
-	out, err := exec.Command("Rscript", "--vanilla", rScript, f.Name()).Output()
+	out, err := exec.Command("Rscript", "--vanilla", rScript, hist.Name(), prof.Name()).Output()
 	if err != nil {
+		log.Printf("[R] error: %v", err)
 		return
 	}
 	result := parseROutput(string(out))
 	rb.mu.Lock()
 	rb.result = result
 	rb.mu.Unlock()
+	log.Printf("[R] session=%s plan=%s player=%s", sessionID, result.Plan, result.PlayerType)
 }
 
 // ─── C++ instinct ─────────────────────────────────────────────────────────────
@@ -482,10 +512,18 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 		rb.count++
 		rb.mu.Unlock()
 		if (count+1)%5 == 0 {
-			go updateRBrain(rb, msg.SessionID, cogCtx.ShortTerm)
+			go updateRBrain(rb, msg.SessionID)
 		}
 	}()
 	wg.Wait()
+
+	// track intent + trust in Redis for R brain
+	trackIntent(ctx, msg.SessionID, cogCtx.Intent)
+	if cogCtx.Intent == "trust" {
+		rdb.IncrByFloat(ctx, fmt.Sprintf("chaos2:session:%s:trust", msg.SessionID), 0.08)
+	} else if cogCtx.Intent == "aggression" {
+		rdb.IncrByFloat(ctx, fmt.Sprintf("chaos2:session:%s:trust", msg.SessionID), -0.05)
+	}
 
 	// 3. attention — Lua
 	runAttention(cogCtx)
