@@ -370,7 +370,7 @@ func redisKey(sessionID string) string {
 }
 
 func loadShortTerm(ctx context.Context, sessionID string) []string {
-	vals, err := rdb.LRange(ctx, redisKey(sessionID), 0, 9).Result()
+	vals, err := rdb.LRange(ctx, redisKey(sessionID), 0, 39).Result()
 	if err != nil {
 		return nil
 	}
@@ -383,8 +383,8 @@ func saveToRedis(ctx context.Context, sessionID, role, text string) {
 	entry := fmt.Sprintf("%d|1.0|%s: %s", ts, role, text)
 	pipe := rdb.Pipeline()
 	pipe.LPush(ctx, key, entry)
-	pipe.LTrim(ctx, key, 0, 19)
-	pipe.Expire(ctx, key, 2*time.Hour)
+	pipe.LTrim(ctx, key, 0, 39)
+	pipe.Expire(ctx, key, 48*time.Hour)
 	pipe.Exec(ctx)
 }
 
@@ -400,7 +400,7 @@ func lastTimestamp(ctx context.Context, sessionID string) int64 {
 
 func saveTimestamp(ctx context.Context, sessionID string, ts int64) {
 	key := fmt.Sprintf("chaos2:session:%s:last_ts", sessionID)
-	rdb.Set(ctx, key, ts, 2*time.Hour)
+	rdb.Set(ctx, key, ts, 48*time.Hour)
 }
 
 // ─── pipeline stages ─────────────────────────────────────────────────────────
@@ -631,7 +631,7 @@ func runForgetting() {
 		for _, m := range survived {
 			pipe.RPush(ctx, key, m)
 		}
-		pipe.Expire(ctx, key, 2*time.Hour)
+		pipe.Expire(ctx, key, 48*time.Hour)
 		if _, err := pipe.Exec(ctx); err != nil {
 			log.Printf("[forgetting] write error on %s: %v", key, err)
 		}
