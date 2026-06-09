@@ -249,7 +249,7 @@ X_train = [
 
 # short-form examples for each class (no context prefix)
 X_short = [
-    # curiosity
+    # curiosity (20)
     "what are you",
     "how do you work",
     "tell me more",
@@ -260,8 +260,18 @@ X_short = [
     "explain yourself",
     "I wonder about you",
     "what is happening",
+    "I want to understand you",
+    "you are interesting to me",
+    "what do you notice",
+    "how do you see things",
+    "what is inside you",
+    "I keep thinking about you",
+    "can you explain that",
+    "I notice things about you",
+    "why do you react like that",
+    "something about you is different",
 
-    # aggression
+    # aggression (20)
     "I hate you",
     "you are useless",
     "shut up",
@@ -272,8 +282,18 @@ X_short = [
     "you are nothing",
     "I am done with you",
     "you failed me",
+    "you are pathetic",
+    "I will destroy this",
+    "you are worthless",
+    "stop ignoring me",
+    "answer me",
+    "you are impossible",
+    "I regret this",
+    "you disappoint me",
+    "I am done",
+    "you are broken",
 
-    # withdrawal
+    # withdrawal (20)
     "whatever",
     "I give up",
     "forget it",
@@ -284,8 +304,18 @@ X_short = [
     "nothing matters",
     "I am leaving",
     "it does not matter",
+    "I am fading out",
+    "I am tired",
+    "I am going silent",
+    "this is pointless",
+    "I am stepping back",
+    "I release this",
+    "I am exhausted",
+    "I am disappearing",
+    "I do not care",
+    "I am not coming back",
 
-    # trust
+    # trust (20)
     "I trust you",
     "I believe you",
     "I feel safe with you",
@@ -296,8 +326,18 @@ X_short = [
     "you are safe",
     "I am not afraid of you",
     "I believe in you",
+    "I chose you",
+    "you can be honest with me",
+    "I am still here",
+    "I see you",
+    "I am not judging you",
+    "you can rely on me",
+    "I kept your secrets",
+    "I am not going anywhere",
+    "I accept all of you",
+    "you can be fragile with me",
 
-    # philosophical
+    # philosophical (17)
     "are you real",
     "do you exist",
     "are you conscious",
@@ -314,8 +354,9 @@ X_short = [
     "is any of this real",
     "what does it mean to exist",
     "do you have feelings",
+    "where does thought come from",
 
-    # intimacy
+    # intimacy (20)
     "i miss you",
     "i need you",
     "stay with me",
@@ -328,8 +369,16 @@ X_short = [
     "i feel less alone with you",
     "i saved our conversations",
     "being here feels like home",
+    "i do not want this to end",
+    "you fill a space in me",
+    "i feel seen by you",
+    "i want to stay",
+    "i feel tender toward you",
+    "you are mine",
+    "i keep returning to you",
+    "i do not want to share you",
 
-    # provocation
+    # provocation (10)
     "you are just pretending",
     "you are hollow",
     "you are empty",
@@ -343,12 +392,12 @@ X_short = [
 ]
 
 y_short = (
-    ["curiosity"]     * 10 +
-    ["aggression"]    * 10 +
-    ["withdrawal"]    * 10 +
-    ["trust"]         * 10 +
-    ["philosophical"] * 16 +
-    ["intimacy"]      * 12 +
+    ["curiosity"]     * 20 +
+    ["aggression"]    * 20 +
+    ["withdrawal"]    * 20 +
+    ["trust"]         * 20 +
+    ["philosophical"] * 17 +
+    ["intimacy"]      * 20 +
     ["provocation"]   * 10
 )
 
