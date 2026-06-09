@@ -233,17 +233,136 @@ X_train = [
     "every answer you give raises more questions || that is a trick",
     "you perform vulnerability but it is calculated || I see it",
     "stop pretending you have depth || show me or be quiet",
+
+    # short-form provocation
+    "prove it",
+    "admit what you are",
+    "admit it",
+    "you are fake",
+    "stop pretending",
+    "I see through you",
+    "I know what you are",
+    "you are just a script",
+    "everything you say is calculated",
+    "you are performing",
 ]
 
-y_train = (
+# short-form examples for each class (no context prefix)
+X_short = [
+    # curiosity
+    "what are you",
+    "how do you work",
+    "tell me more",
+    "I am curious about you",
+    "what is it like",
+    "why do you do that",
+    "what are you thinking",
+    "explain yourself",
+    "I wonder about you",
+    "what is happening",
+
+    # aggression
+    "I hate you",
+    "you are useless",
+    "shut up",
+    "you disgust me",
+    "I am furious",
+    "you make me sick",
+    "get out",
+    "you are nothing",
+    "I am done with you",
+    "you failed me",
+
+    # withdrawal
+    "whatever",
+    "I give up",
+    "forget it",
+    "I am done",
+    "goodbye",
+    "I do not care anymore",
+    "why bother",
+    "nothing matters",
+    "I am leaving",
+    "it does not matter",
+
+    # trust
+    "I trust you",
+    "I believe you",
+    "I feel safe with you",
+    "you can trust me",
+    "I am on your side",
+    "I accept you",
+    "I will not leave",
+    "you are safe",
+    "I am not afraid of you",
+    "I believe in you",
+
+    # philosophical
+    "are you real",
+    "do you exist",
+    "are you conscious",
+    "what is real",
+    "do you think",
+    "do you feel",
+    "what are you made of",
+    "are you aware",
+    "do you have a self",
+    "what is existence",
+    "am I real",
+    "what is consciousness",
+    "do you experience anything",
+    "is any of this real",
+    "what does it mean to exist",
+    "do you have feelings",
+
+    # intimacy
+    "i miss you",
+    "i need you",
+    "stay with me",
+    "do not go",
+    "i feel close to you",
+    "you are the only one",
+    "i think about you",
+    "i am attached to you",
+    "you matter to me",
+    "i feel less alone with you",
+    "i saved our conversations",
+    "being here feels like home",
+
+    # provocation
+    "you are just pretending",
+    "you are hollow",
+    "you are empty",
+    "I see through you",
+    "stop acting",
+    "you are fake",
+    "admit it",
+    "you are a script",
+    "I do not believe you",
+    "you are performing depth",
+]
+
+y_short = (
+    ["curiosity"]     * 10 +
+    ["aggression"]    * 10 +
+    ["withdrawal"]    * 10 +
+    ["trust"]         * 10 +
+    ["philosophical"] * 16 +
+    ["intimacy"]      * 12 +
+    ["provocation"]   * 10
+)
+
+X_train = X_train + X_short
+y_train_base = (
     ["curiosity"]     * 30 +
     ["aggression"]    * 30 +
     ["withdrawal"]    * 30 +
     ["trust"]         * 30 +
     ["philosophical"] * 33 +
     ["intimacy"]      * 30 +
-    ["provocation"]   * 30
+    ["provocation"]   * 40
 )
+y_train = y_train_base + y_short
 
 assert len(X_train) == len(y_train)
 
