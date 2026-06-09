@@ -358,6 +358,14 @@ func (ip *instinctProcess) classify(text string) string {
 var rdb *redis.Client
 
 func initRedis() {
+	if url := os.Getenv("REDIS_URL"); url != "" {
+		opt, err := redis.ParseURL(url)
+		if err != nil {
+			log.Fatalf("[redis] bad URL: %v", err)
+		}
+		rdb = redis.NewClient(opt)
+		return
+	}
 	addr := os.Getenv("REDIS_ADDR")
 	if addr == "" {
 		addr = "localhost:6379"
