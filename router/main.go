@@ -52,6 +52,136 @@ type CognitiveContext struct {
 	Rhythm      string
 	Silent      bool
 	Response    string
+	ChaosState  string
+}
+
+// ─── state machine ───────────────────────────────────────────────────────────
+
+type stateValues struct {
+	Passivity    int
+	Distrust     int
+	Indifference int
+}
+
+var stateData = map[string]stateValues{
+	"Neutral":               {60, 50, 60},
+	"Curious":               {40, 60, 40},
+	"Confident":             {40, 25, 50},
+	"Hostile":               {20, 70, 45},
+	"Obsessive_Love":        {70, 40, 10},
+	"Obsessive_Hate":        {10, 70, 45},
+	"Obsessive_Fascination": {20, 70, 30},
+	"Redemptive":            {70, 50, 50},
+	"Absent":                {95,  5, 95},
+}
+
+var stateCooldowns = map[string]int{
+	"Neutral": 3, "Curious": 4, "Confident": 5, "Hostile": 6,
+	"Obsessive_Love": 7, "Obsessive_Hate": 7, "Obsessive_Fascination": 5,
+	"Redemptive": 6, "Absent": 4,
+}
+
+// intent → current_state → next_state
+var intentTransitions = map[string]map[string]string{
+	"aggression": {
+		"Neutral": "Hostile", "Confident": "Hostile", "Curious": "Obsessive_Hate",
+		"Obsessive_Love": "Obsessive_Hate", "Redemptive": "Hostile",
+		"Absent": "Hostile", "Obsessive_Fascination": "Hostile",
+	},
+	"curiosity": {
+		"Neutral": "Curious", "Absent": "Curious", "Hostile": "Curious",
+		"Obsessive_Hate": "Curious", "Obsessive_Love": "Curious",
+		"Obsessive_Fascination": "Curious", "Redemptive": "Curious",
+	},
+	"trust": {
+		"Neutral": "Confident", "Curious": "Confident", "Hostile": "Redemptive",
+		"Obsessive_Hate": "Redemptive", "Obsessive_Love": "Confident",
+		"Obsessive_Fascination": "Confident", "Redemptive": "Confident",
+		"Absent": "Neutral",
+	},
+	"withdrawal": {
+		"Neutral": "Absent", "Curious": "Absent", "Confident": "Absent",
+		"Hostile": "Absent", "Obsessive_Love": "Absent", "Obsessive_Hate": "Absent",
+		"Obsessive_Fascination": "Absent", "Redemptive": "Absent",
+	},
+	"philosophical": {
+		"Neutral": "Curious", "Curious": "Absent", "Confident": "Curious",
+		"Hostile": "Curious", "Obsessive_Love": "Obsessive_Fascination",
+		"Obsessive_Hate": "Obsessive_Fascination", "Obsessive_Fascination": "Absent",
+		"Redemptive": "Absent",
+	},
+	"intimacy": {
+		"Neutral": "Obsessive_Love", "Confident": "Obsessive_Love",
+		"Redemptive": "Obsessive_Love", "Curious": "Obsessive_Love",
+		"Absent": "Obsessive_Love", "Obsessive_Fascination": "Obsessive_Love",
+		"Hostile": "Obsessive_Hate", "Obsessive_Hate": "Obsessive_Love",
+	},
+	"provocation": {
+		"Neutral": "Obsessive_Fascination", "Curious": "Obsessive_Fascination",
+		"Absent": "Obsessive_Fascination", "Confident": "Hostile",
+		"Redemptive": "Hostile", "Obsessive_Love": "Obsessive_Hate",
+		"Obsessive_Fascination": "Hostile", "Hostile": "Obsessive_Hate",
+	},
+}
+
+// plan blocks certain transitions
+var planAllowedIntents = map[string][]string{
+	"mirror":   {},
+	"resist":   {"aggression"},
+	"collapse": {"trust"},
+	"reveal":   {"trust", "curiosity", "intimacy"},
+}
+
+func planAllows(plan, intent string) bool {
+	allowed, restricted := planAllowedIntents[plan]
+	if !restricted {
+		return true
+	}
+	for _, a := range allowed {
+		if a == intent {
+			return true
+		}
+	}
+	return false
+}
+
+func loadChaosState(ctx context.Context, sessionID string) (string, int) {
+	stateKey := fmt.Sprintf("chaos2:session:%s:chaos_state", sessionID)
+	countKey := fmt.Sprintf("chaos2:session:%s:state_count", sessionID)
+	state, err := rdb.Get(ctx, stateKey).Result()
+	if err != nil || state == "" {
+		state = "Neutral"
+	}
+	countStr, _ := rdb.Get(ctx, countKey).Result()
+	count, _ := strconv.Atoi(countStr)
+	return state, count
+}
+
+func saveChaosState(ctx context.Context, sessionID, state string, count int) {
+	stateKey := fmt.Sprintf("chaos2:session:%s:chaos_state", sessionID)
+	countKey := fmt.Sprintf("chaos2:session:%s:state_count", sessionID)
+	rdb.Set(ctx, stateKey, state, 24*time.Hour)
+	rdb.Set(ctx, countKey, count, 24*time.Hour)
+}
+
+func transitionState(ctx context.Context, sessionID, intent, plan string) string {
+	state, count := loadChaosState(ctx, sessionID)
+	count++
+	cooldown := stateCooldowns[state]
+	if cooldown == 0 {
+		cooldown = 4
+	}
+	newState := state
+	if count >= cooldown && planAllows(plan, intent) {
+		if transitions, ok := intentTransitions[intent]; ok {
+			if next, ok := transitions[state]; ok {
+				newState = next
+				count = 0
+			}
+		}
+	}
+	saveChaosState(ctx, sessionID, newState, count)
+	return newState
 }
 
 // ─── R brain ─────────────────────────────────────────────────────────────────
@@ -381,6 +511,10 @@ func runPython(ctx *CognitiveContext) {
 		ctx.Response = ""
 		return
 	}
+	sv := stateData[ctx.ChaosState]
+	if sv.Passivity == 0 {
+		sv = stateData["Neutral"]
+	}
 	payload, _ := json.Marshal(map[string]interface{}{
 		"text":     ctx.Session.Text,
 		"intent":   ctx.Intent,
@@ -388,14 +522,11 @@ func runPython(ctx *CognitiveContext) {
 		"intensity": ctx.Intensity,
 		"rhythm":   ctx.Rhythm,
 		"history":  ctx.ShortTerm,
+		"chaos_state": ctx.ChaosState,
 		"state": map[string]interface{}{
-			"passivity":   100 - int(ctx.Intensity*100),
-			"distrust":    50 + int(ctx.Intensity*30),
-			"indifference": func() int {
-				if ctx.RBrain.EmotionalDrift == "calming" { return 30 }
-				if ctx.RBrain.EmotionalDrift == "escalating" { return 20 }
-				return 60
-			}(),
+			"passivity":    sv.Passivity,
+			"distrust":     sv.Distrust,
+			"indifference": sv.Indifference,
 		},
 		"player": map[string]string{
 			"type":         ctx.RBrain.PlayerType,
@@ -527,6 +658,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 
 	// track intent + trust in Redis for R brain
 	trackIntent(ctx, msg.SessionID, cogCtx.Intent)
+	cogCtx.ChaosState = transitionState(ctx, msg.SessionID, cogCtx.Intent, cogCtx.RBrain.Plan)
 	if cogCtx.Intent == "trust" {
 		rdb.IncrByFloat(ctx, fmt.Sprintf("chaos2:session:%s:trust", msg.SessionID), 0.08)
 	} else if cogCtx.Intent == "aggression" {
@@ -574,6 +706,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 		"drift":        cogCtx.RBrain.EmotionalDrift,
 		"threat":       cogCtx.RBrain.ThreatLevel,
 		"manipulation": cogCtx.RBrain.Manipulation,
+		"chaos_state":  cogCtx.ChaosState,
 	})
 }
 
